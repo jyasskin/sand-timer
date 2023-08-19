@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>Sand Timer</title>
+    <script type="module">
+      import {Temporal} from 'https://cdn.jsdelivr.net/npm/temporal-polyfill@0.0.8/dist/impl.mjs';
+
+      const minutes = document.getElementById('minutes');
+      const seconds = document.getElementById('seconds');
+      const running = document.getElementById('running');
+
+      let duration = Temporal.Duration.from({minutes: 3});
+      function updateDuration() {
+        duration = Temporal.Duration.from({minutes: minutes.valueAsNumber, seconds: seconds.valueAsNumber})
+        duration = duration.round('second');
+        minutes.valueAsNumber = duration.minutes;
+        seconds.valueAsNumber = duration.seconds;
+      }
+      minutes.addEventListener('change', updateDuration);
+      seconds.addEventListener('change', updateDuration);
+
+      let start = null, deadline = null, timer = null;
+      document.getElementById('start').addEventListener('click', () => {
+        start = Temporal.Now.instant();
+        deadline = start.add(duration);
+        updateUi();
+      });
+      document.getElementById('flip').addEventListener('click', () => {
+        const now = Temporal.Now.instant();
+        const fraction = now.subtract(start).total('millisecond') / duration.total('millisecond');
+        start = now.subtract(Temporal.Duration.from({milliseconds: fraction * duration.total('millisecond')}));
+        deadline = start.add(duration);
+        updateUi();
+      });
+
+      function updateUi() {
+
+      }
+    </script>
+    <style>
+        #minutes { width: 5ch; }
+        #seconds { width: 4ch; }
+        #time-left { font-size: min(10vw, 10vh); }
+    </style>
+</head>
+<body>
+  <form id="duration">
+    Duration:
+    <label title="minutes"><input id="minutes" type="number" value="3" min="0">m</label><label title="seconds"><input id="seconds" type="number" value="0" min="0" max="59">s</label>
+  </form>
+
+  <p id="time-left"></p>
+
+  <button id="start" type="button">Start</button>
+  <button id="flip" type="button">Flip</button>
+  <button id="reset" type="button">Reset</button>
+
+</body>
+</html>
