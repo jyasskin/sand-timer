@@ -4,44 +4,178 @@
     <meta charset="UTF-8" />
     <title>Sand Timer</title>
     <script type="module">
+      // @ts-check
       import {Temporal} from 'https://cdn.jsdelivr.net/npm/temporal-polyfill@0.0.8/dist/impl.mjs';
 
-      const minutes = document.getElementById('minutes');
-      const seconds = document.getElementById('seconds');
-      const running = document.getElementById('running');
+      /**
+       * @param {String} name
+       */
+      function inputElem(name) {
+        const elem = document.getElementById(name);
+        if (elem === null || !(elem instanceof HTMLInputElement)) {
+          throw new Error(`Missing input element: ${name}`);
+        }
+        return elem;
+      }
+      /**
+       * @param {String} name
+       */
+       function buttonElem(name) {
+        const elem = document.getElementById(name);
+        if (elem === null || !(elem instanceof HTMLButtonElement)) {
+          throw new Error(`Missing button element: ${name}`);
+        }
+        return elem;
+      }
+      /**
+       * @param {String} name
+       */
+       function paraElem(name) {
+        const elem = document.getElementById(name);
+        if (elem === null || !(elem instanceof HTMLParagraphElement)) {
+          throw new Error(`Missing p element: ${name}`);
+        }
+        return elem;
+      }
+
+      /**
+       * @param {()=>void} f
+       * @param {Temporal.Instant} time
+       */
+       function schedule(f, time) {
+        return setTimeout(f, Temporal.Now.instant().until(time).total('milliseconds'));
+      }
+
+      const minutesElem = inputElem('minutes');
+      const secondsElem = inputElem('seconds');
 
       let duration = Temporal.Duration.from({minutes: 3});
       function updateDuration() {
-        duration = Temporal.Duration.from({minutes: minutes.valueAsNumber, seconds: seconds.valueAsNumber})
-        duration = duration.round('second');
-        minutes.valueAsNumber = duration.minutes;
-        seconds.valueAsNumber = duration.seconds;
+        let minutes = minutesElem.valueAsNumber;
+        if (isNaN(minutes)) minutes = 0;
+        let seconds = secondsElem.valueAsNumber;
+        if (isNaN(seconds)) seconds = 0;
+        duration = Temporal.Duration.from({minutes, seconds})
+        duration = duration.round({largestUnit: 'minute', smallestUnit: 'second'});
+        minutesElem.valueAsNumber = duration.minutes;
+        secondsElem.valueAsNumber = duration.seconds;
+        updateUi();
       }
-      minutes.addEventListener('change', updateDuration);
-      seconds.addEventListener('change', updateDuration);
+      minutesElem.addEventListener('change', updateDuration);
+      secondsElem.addEventListener('change', updateDuration);
 
       let start = null, deadline = null, timer = null;
-      document.getElementById('start').addEventListener('click', () => {
+      const startButton = buttonElem('start');
+      const flipButton = buttonElem('flip');
+      const resetButton = buttonElem('reset');
+      startButton.addEventListener('click', () => {
         start = Temporal.Now.instant();
         deadline = start.add(duration);
         updateUi();
       });
-      document.getElementById('flip').addEventListener('click', () => {
+      flipButton.addEventListener('click', () => {
         const now = Temporal.Now.instant();
-        const fraction = now.subtract(start).total('millisecond') / duration.total('millisecond');
-        start = now.subtract(Temporal.Duration.from({milliseconds: fraction * duration.total('millisecond')}));
-        deadline = start.add(duration);
+        const fraction = 1 - start.until(now).total('millisecond') / duration.total('millisecond');
+        if (fraction < 0) {
+          startButton.click();
+        } else {
+          start = now.subtract(Temporal.Duration.from({milliseconds: Math.round(fraction * duration.total('millisecond'))}));
+          deadline = start.add(duration);
+          updateUi();
+        }
+      });
+      resetButton.addEventListener('click', () => {
+        start = null;
+        deadline = null;
         updateUi();
       });
 
-      function updateUi() {
+      const timeLeftElem = paraElem('time-left');
+      function renderTimeLeft(duration) {
+        const minutes = duration.minutes;
+        const seconds = duration.seconds;
+        timeLeftElem.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+      }
 
+      function updateUi() {
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        const now = Temporal.Now.instant();
+        if (deadline === null) {
+          document.body.classList.remove('running');
+          minutesElem.disabled = false;
+          secondsElem.disabled = false;
+          stopRinging();
+          renderTimeLeft(duration);
+        } else {
+          document.body.classList.add('running');
+          minutesElem.disabled = true;
+          secondsElem.disabled = true;
+          if (Temporal.Instant.compare(now, deadline) < 0) {
+            stopRinging();
+            const timeLeft = now.until(deadline).round({largestUnit: 'minute', smallestUnit: 'second'});
+            renderTimeLeft(timeLeft);
+            timer = schedule(updateUi, deadline.subtract(timeLeft).add({seconds:1}));
+          } else {
+            ring();
+            renderTimeLeft(Temporal.Duration.from({seconds:0}));
+            const enableResetTime = deadline.add({milliseconds: 300});
+            if (Temporal.Instant.compare(now, enableResetTime) < 0) {
+              resetButton.disabled = true;
+              timer = schedule(updateUi, enableResetTime);
+            } else {
+              resetButton.disabled = false;
+            }
+          }
+        }
+      }
+
+      // Sound
+
+      // 1s of 44.1kHz audio.
+      const alarmBuffer = (() => {
+        const ctx = new OfflineAudioContext(1, 44100, 44100);
+        const tone = new OscillatorNode(ctx);
+        const gain = new GainNode(ctx);
+        gain.gain.setValueAtTime(1, 0);
+        gain.gain.setValueAtTime(0, 0.5);
+        tone.connect(gain).connect(ctx.destination)
+        tone.start();
+        return ctx.startRendering();
+      })();
+
+      let audioCtx = null;
+      let alarmSound = null;
+      async function ring() {
+        if (alarmSound !== null) {
+          return;
+        }
+        document.body.classList.add('ringing');
+        if (audioCtx === null) {
+          audioCtx = new AudioContext();
+        }
+        alarmSound = new AudioBufferSourceNode(audioCtx, {buffer: await alarmBuffer, loop: true});
+        alarmSound.connect(audioCtx.destination);
+        alarmSound.start();
+      }
+      function stopRinging() {
+        document.body.classList.remove('ringing');
+        if (alarmSound !== null) {
+          alarmSound.stop();
+          alarmSound = null;
+        }
       }
     </script>
     <style>
         #minutes { width: 5ch; }
         #seconds { width: 4ch; }
         #time-left { font-size: min(10vw, 10vh); }
+
+        body.running #start {display: none}
+        body:not(.running) #flip {display: none}
+        body:not(.running) #reset {display: none}
     </style>
 </head>
 <body>
