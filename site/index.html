@@ -1,194 +1,383 @@
 <!DOCTYPE html>
-<html>
+<html lang="en-US">
+
 <head>
-    <meta charset="UTF-8" />
-    <title>Sand Timer</title>
-    <script type="module">
-      // @ts-check
-      import {Temporal} from 'https://cdn.jsdelivr.net/npm/temporal-polyfill@0.0.8/dist/impl.mjs';
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width">
+  <title>Sand Timer</title>
+  <script type="module">
+    // @ts-check
+    import { Temporal } from 'https://cdn.jsdelivr.net/npm/temporal-polyfill@0.0.8/dist/impl.mjs';
 
-      /**
-       * @param {String} name
-       */
-      function inputElem(name) {
-        const elem = document.getElementById(name);
-        if (elem === null || !(elem instanceof HTMLInputElement)) {
-          throw new Error(`Missing input element: ${name}`);
-        }
-        return elem;
+    /**
+     * @param {String} name
+     */
+    function elem(name) {
+      const elem = document.getElementById(name);
+      if (elem === null) {
+        throw new Error(`Missing input element: ${name}`);
       }
-      /**
-       * @param {String} name
-       */
-       function buttonElem(name) {
-        const elem = document.getElementById(name);
-        if (elem === null || !(elem instanceof HTMLButtonElement)) {
-          throw new Error(`Missing button element: ${name}`);
-        }
-        return elem;
+      return elem;
+    }
+    /**
+     * @param {HTMLElement} elem
+     */
+    function asInput(elem) {
+      if (!(elem instanceof HTMLInputElement)) {
+        throw new Error(`Expected input element, got ${elem.tagName}`);
       }
-      /**
-       * @param {String} name
-       */
-       function paraElem(name) {
-        const elem = document.getElementById(name);
-        if (elem === null || !(elem instanceof HTMLParagraphElement)) {
-          throw new Error(`Missing p element: ${name}`);
-        }
-        return elem;
+      return elem;
+    }
+    /**
+     * @param {HTMLElement} elem
+     */
+    function asButton(elem) {
+      if (!(elem instanceof HTMLButtonElement)) {
+        throw new Error(`Expected button element, got ${elem.tagName}`);
       }
+      return elem;
+    }
 
-      /**
-       * @param {()=>void} f
-       * @param {Temporal.Instant} time
-       */
-       function schedule(f, time) {
-        return setTimeout(f, Temporal.Now.instant().until(time).total('milliseconds'));
-      }
+    /**
+     * @param {()=>void} f
+     * @param {Temporal.Instant} time
+     */
+    function schedule(f, time) {
+      return setTimeout(f, Temporal.Now.instant().until(time).total('milliseconds'));
+    }
 
-      const minutesElem = inputElem('minutes');
-      const secondsElem = inputElem('seconds');
+    const minutesElem = asInput(elem('minutes'));
+    const secondsElem = asInput(elem('seconds'));
+    const timeLeftElem = elem('time-left');
+    let start = null, deadline = null, timer = null;
+    const resetButton = asButton(elem('reset'));
+    const clickTarget = elem('click-target');
+    const hourglass = elem('hourglass');
+    let audioCtx = null;
+    let alarmSound = null;
 
-      let duration = Temporal.Duration.from({minutes: 3});
-      function updateDuration() {
+    let duration = null;
+    /**
+     * @param {Temporal.Duration | null} newDuration
+     */
+    function updateDuration(newDuration = null) {
+      duration = newDuration;
+      if (duration === null) {
         let minutes = minutesElem.valueAsNumber;
         if (isNaN(minutes)) minutes = 0;
         let seconds = secondsElem.valueAsNumber;
         if (isNaN(seconds)) seconds = 0;
-        duration = Temporal.Duration.from({minutes, seconds})
-        duration = duration.round({largestUnit: 'minute', smallestUnit: 'second'});
-        minutesElem.valueAsNumber = duration.minutes;
-        secondsElem.valueAsNumber = duration.seconds;
-        updateUi();
+        duration = Temporal.Duration.from({ minutes, seconds });
       }
-      minutesElem.addEventListener('change', updateDuration);
-      secondsElem.addEventListener('change', updateDuration);
+      duration = duration.round({ largestUnit: 'minute', smallestUnit: 'second' });
+      localStorage.setItem('duration', duration.total('second'));
+      minutesElem.valueAsNumber = duration.minutes;
+      secondsElem.valueAsNumber = duration.seconds;
+      timeLeftElem.style.setProperty("--total-milliseconds-left", duration.total("milliseconds"));
+      updateUi();
+    }
+    minutesElem.addEventListener('change', () => updateDuration());
+    secondsElem.addEventListener('change', () => updateDuration());
+    (function () {
+      const storageDuration = parseInt(localStorage.getItem('duration') ?? "180", 10);
+      if (isNaN(storageDuration)) {
+        updateDuration(Temporal.Duration.from({ minutes: 3 }));
+      } else {
+        updateDuration(Temporal.Duration.from({ seconds: storageDuration }));
+      }
+    })();
 
-      let start = null, deadline = null, timer = null;
-      const startButton = buttonElem('start');
-      const flipButton = buttonElem('flip');
-      const resetButton = buttonElem('reset');
-      startButton.addEventListener('click', () => {
-        start = Temporal.Now.instant();
-        deadline = start.add(duration);
-        updateUi();
+    function startTimer() {
+      start = Temporal.Now.instant();
+      deadline = start.add(duration);
+      animateTimerFlip();
+      updateUi();
+    }
+    function timerFraction() {
+      return start.until(Temporal.Now.instant()).total('millisecond') / duration.total('millisecond');
+    }
+    function resetTimer() {
+      start = null;
+      deadline = null;
+      updateUi();
+    }
+    function animateTimerFlip() {
+      hourglass.animate([
+        { transform: 'rotate(180deg)' },
+        { transform: 'rotate(0)' },
+      ], {
+        duration: 300,
+        easing: 'ease-in-out',
       });
-      flipButton.addEventListener('click', () => {
-        const now = Temporal.Now.instant();
+      hourglass.animate([
+        { transform: 'translateX(3em)' },
+        { transform: 'translateX(0)' },
+      ], {
+        pseudoElement: '::after',
+        duration: 300,
+        easing: 'ease-in-out',
+      });
+    }
+
+    clickTarget.addEventListener('click', () => {
+      if (start === null) {
+        startTimer();
+        return;
+      }
+      const now = Temporal.Now.instant();
+      if (Temporal.Instant.compare(deadline.add(Temporal.Duration.from({ seconds: 1 })), now) <= 0) {
+        // The timer has been ringing for at least a second.
+        resetTimer();
+        return;
+      }
+      if (Temporal.Instant.compare(now, deadline) < 0) {
+        // The timer hasn't rung yet, so flip it.
         const fraction = 1 - start.until(now).total('millisecond') / duration.total('millisecond');
-        if (fraction < 0) {
-          startButton.click();
-        } else {
-          start = now.subtract(Temporal.Duration.from({milliseconds: Math.round(fraction * duration.total('millisecond'))}));
-          deadline = start.add(duration);
-          updateUi();
-        }
-      });
-      resetButton.addEventListener('click', () => {
-        start = null;
-        deadline = null;
+        start = now.subtract(Temporal.Duration.from({ milliseconds: Math.round(fraction * duration.total('millisecond')) }));
+        deadline = start.add(duration);
+        animateTimerFlip();
         updateUi();
-      });
-
-      const timeLeftElem = paraElem('time-left');
-      function renderTimeLeft(duration) {
-        const minutes = duration.minutes;
-        const seconds = duration.seconds;
-        timeLeftElem.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        return;
       }
+    });
+    resetButton.addEventListener('click', resetTimer);
 
-      function updateUi() {
-        if (timer !== null) {
-          clearTimeout(timer);
-          timer = null;
-        }
-        const now = Temporal.Now.instant();
-        if (deadline === null) {
-          document.body.classList.remove('running');
-          minutesElem.disabled = false;
-          secondsElem.disabled = false;
+    /**
+     * @param {Temporal.Duration} duration
+     */
+    function animateTimeLeft(duration) {
+      timeLeftElem.animate([
+        { "--total-milliseconds-left": duration.total("milliseconds") },
+        { "--total-milliseconds-left": 0 },
+      ], {
+        duration: duration.total("milliseconds"),
+        fill: "forwards",
+      });
+    }
+
+    function animateSand() {
+      const now = Temporal.Now.instant();
+      hourglass.animate({
+        clipPath: ["var(--polygonB1)", "var(--polygonB2)", "var(--polygonB3)", "var(--polygonB4)", "var(--polygonB5)"],
+        offset: [0, .1, .5, .95, 1],
+      }, {
+        pseudoElement: '::before',
+        duration: duration.total('milliseconds'),
+        delay: now.until(start).total('milliseconds'),
+        fill: 'forwards',
+      });
+    }
+
+    function updateUi() {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      const now = Temporal.Now.instant();
+      if (deadline === null) {
+        document.body.classList.remove('running');
+        minutesElem.disabled = false;
+        secondsElem.disabled = false;
+        stopRinging();
+        document.getAnimations().forEach(a => a.cancel());
+      } else {
+        document.body.classList.add('running');
+        minutesElem.disabled = true;
+        secondsElem.disabled = true;
+        if (Temporal.Instant.compare(now, deadline) < 0) {
           stopRinging();
-          renderTimeLeft(duration);
+          animateTimeLeft(now.until(deadline));
+          animateSand();
         } else {
-          document.body.classList.add('running');
-          minutesElem.disabled = true;
-          secondsElem.disabled = true;
-          if (Temporal.Instant.compare(now, deadline) < 0) {
-            stopRinging();
-            const timeLeft = now.until(deadline).round({largestUnit: 'minute', smallestUnit: 'second'});
-            renderTimeLeft(timeLeft);
-            timer = schedule(updateUi, deadline.subtract(timeLeft).add({seconds:1}));
+          ring();
+          const enableResetTime = deadline.add({ seconds: 1 });
+          if (Temporal.Instant.compare(now, enableResetTime) < 0) {
+            document.body.classList.remove('can-reset');
+            timer = schedule(updateUi, enableResetTime);
           } else {
-            ring();
-            renderTimeLeft(Temporal.Duration.from({seconds:0}));
-            const enableResetTime = deadline.add({milliseconds: 300});
-            if (Temporal.Instant.compare(now, enableResetTime) < 0) {
-              resetButton.disabled = true;
-              timer = schedule(updateUi, enableResetTime);
-            } else {
-              resetButton.disabled = false;
-            }
+            document.body.classList.add('can-reset');
+            resetButton.disabled = false;
           }
         }
       }
+    }
 
-      // Sound
+    // Sound
 
-      // 1s of 44.1kHz audio.
-      const alarmBuffer = (() => {
-        const ctx = new OfflineAudioContext(1, 44100, 44100);
-        const tone = new OscillatorNode(ctx);
-        const gain = new GainNode(ctx);
-        gain.gain.setValueAtTime(1, 0);
-        gain.gain.setValueAtTime(0, 0.5);
-        tone.connect(gain).connect(ctx.destination)
-        tone.start();
-        return ctx.startRendering();
-      })();
+    // 1s of 44.1kHz audio.
+    const alarmBuffer = (() => {
+      const ctx = new OfflineAudioContext(1, 44100, 44100);
+      const tone = new OscillatorNode(ctx);
+      const gain = new GainNode(ctx);
+      gain.gain.setValueAtTime(1, 0);
+      gain.gain.setValueAtTime(0, 0.5);
+      tone.connect(gain).connect(ctx.destination)
+      tone.start();
+      return ctx.startRendering();
+    })();
 
-      let audioCtx = null;
-      let alarmSound = null;
-      async function ring() {
-        if (alarmSound !== null) {
-          return;
-        }
-        document.body.classList.add('ringing');
-        if (audioCtx === null) {
-          audioCtx = new AudioContext();
-        }
-        alarmSound = new AudioBufferSourceNode(audioCtx, {buffer: await alarmBuffer, loop: true});
-        alarmSound.connect(audioCtx.destination);
-        alarmSound.start();
+    async function ring() {
+      if (alarmSound !== null) {
+        return;
       }
-      function stopRinging() {
-        document.body.classList.remove('ringing');
-        if (alarmSound !== null) {
-          alarmSound.stop();
-          alarmSound = null;
-        }
+      document.body.classList.add('ringing');
+      if (audioCtx === null) {
+        audioCtx = new AudioContext();
       }
-    </script>
-    <style>
-        #minutes { width: 5ch; }
-        #seconds { width: 4ch; }
-        #time-left { font-size: min(10vw, 10vh); }
+      alarmSound = new AudioBufferSourceNode(audioCtx, { buffer: await alarmBuffer, loop: true });
+      alarmSound.connect(audioCtx.destination);
+      alarmSound.start();
+    }
+    function stopRinging() {
+      document.body.classList.remove('ringing');
+      if (alarmSound !== null) {
+        alarmSound.stop();
+        alarmSound = null;
+      }
+    }
 
-        body.running #start {display: none}
-        body:not(.running) #flip {display: none}
-        body:not(.running) #reset {display: none}
-    </style>
+    updateUi();
+  </script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    #minutes {
+      width: 5ch;
+    }
+
+    #seconds {
+      width: 4ch;
+    }
+
+    @property --total-milliseconds-left {
+      syntax: '<integer>';
+      initial-value: 0;
+      inherits: false;
+    }
+
+    @property --minutes-left {
+      syntax: '<integer>';
+      initial-value: 0;
+      inherits: false;
+    }
+
+    @property --seconds-left {
+      syntax: '<integer>';
+      initial-value: 0;
+      inherits: false;
+    }
+
+    #time-left {
+      --minutes-left: max(var(--total-milliseconds-left) / 60000 - 0.5, 0);
+      /* Emulate ceil(). */
+      --seconds-left: calc((var(--total-milliseconds-left) - var(--minutes-left) * 60000) / 1000 + 0.4999);
+      counter-reset: minutes-left var(--minutes-left) seconds-left var(--seconds-left);
+
+      font-size: min(20vw, 20vh);
+      margin: 0;
+    }
+
+    #time-left::before {
+      content: counter(minutes-left) ":" counter(seconds-left, decimal-leading-zero);
+    }
+
+    body:not(.running) #reset {
+      display: none
+    }
+
+    /* Thanks to https://codepen.io/jkantner/pen/wvWXyKG for the hourglass animation. */
+
+    :root {
+      --bg: #fff;
+      --hg-sand: #2e3138;
+      --hg-caps: #255ff4;
+      --hg-bg: #737a8c55;
+
+    }
+
+    body {
+      background: var(--bg);
+      display: grid;
+      font: 1em/1.5 sans-serif;
+      height: 100vh;
+      place-items: center;
+    }
+
+    #hourglass,
+    #hourglass:before,
+    #hourglass:after {
+      border: 0;
+      margin: 0;
+      padding: 0;
+    }
+
+    #hourglass {
+      --polygonH: polygon(0% 0%, 100% 0%, 100% 5.55%, 95% 5.55%, 95% 28%, 60% 46%, 60% 54%, 95% 72%, 95% 94.45%, 100% 94.45%, 100% 100%, 0% 100%, 0% 94.45%, 5% 94.45%, 5% 72%, 40% 54%, 40% 46%, 5% 28%, 5% 5.55%, 0% 5.55%);
+      background-image: linear-gradient(var(--hg-caps) 0.5em, var(--hg-bg) 0.5em 8.5em, var(--hg-caps) 8.5em);
+      clip-path: var(--polygonH);
+      overflow: hidden;
+      position: relative;
+      font-size: calc(16px + (24 - 16) * (100vw - 320px) / (1280 - 320));
+      width: 5em;
+      height: 9em;
+      z-index: 0;
+    }
+
+    #hourglass:before,
+    #hourglass:after {
+      animation-timing-function: linear;
+      content: "";
+      display: block;
+      position: absolute;
+    }
+
+    #hourglass:before {
+      --polygonB1: polygon(0% 0%, 100% 0%, 100% 24%, 50% 47%, 50% 47%, 50% 47%, 50% 47%, 50% 47%, 50% 47%, 50% 47%, 50% 47%, 0% 24%);
+      --polygonB2: polygon(0% 4%, 100% 4%, 100% 24%, 55% 45%, 55% 100%, 55% 100%, 55% 100%, 45% 100%, 45% 100%, 45% 100%, 45% 45%, 0% 24%);
+      --polygonB3: polygon(0% 24%, 100% 24%, 100% 24%, 55% 45%, 55% 80%, 100% 100%, 100% 100%, 0% 100%, 0% 100%, 45% 80%, 45% 45%, 0% 24%);
+      --polygonB4: polygon(45% 45%, 55% 45%, 55% 45%, 55% 45%, 55% 58%, 100% 76%, 100% 100%, 0% 100%, 0% 76%, 45% 58%, 45% 45%, 45% 45%);
+      --polygonB5: polygon(50% 53%, 50% 53%, 50% 53%, 50% 53%, 50% 53%, 100% 76%, 100% 100%, 0% 100%, 0% 76%, 50% 53%, 50% 53%, 50% 53%);
+      background-color: var(--hg-sand);
+      background-size: 100% 3.6em;
+      clip-path: var(--polygonB5);
+      top: 0.5em;
+      left: 0.5em;
+      width: 4em;
+      height: 8em;
+      z-index: 1;
+    }
+
+    #hourglass:after {
+      background:
+        linear-gradient(90deg, #0000 0.5em, #0003 0.5em 1.5em, #0000 1.5em 3.5em, #fff3 3.5em 4.5em, #fff0 4.5em 6.5em, #0003 6.5em 7.5em, #0000 7.5em) 0 0 / 100% 0.5em,
+        linear-gradient(90deg, #0000 0.75em, #0003 0.75em 1.25em, #0000 1.25em 3.75em, #fff3 3.75em 4.25em, #fff0 4.25em 6.75em, #0003 6.75em 7.25em, #0000 7.25em) 0 0.5em / 100% 8em,
+        linear-gradient(90deg, #0000 0.5em, #0003 0.5em 1.5em, #0000 1.5em 3.5em, #fff3 3.5em 4.5em, #fff0 4.5em 6.5em, #0003 6.5em 7.5em, #0000 7.5em) 0 100% / 100% 0.5em;
+      background-repeat: repeat-x;
+      top: 0;
+      left: -3em;
+      width: 200%;
+      height: 100%;
+      z-index: 2;
+    }
+  </style>
 </head>
+
 <body>
   <form id="duration">
     Duration:
-    <label title="minutes"><input id="minutes" type="number" value="3" min="0">m</label><label title="seconds"><input id="seconds" type="number" value="0" min="0" max="59">s</label>
+    <label title="minutes"><input id="minutes" type="number" value="3" min="0">m</label><label title="seconds"><input
+        id="seconds" type="number" value="0" min="0" max="59">s</label>
   </form>
 
-  <p id="time-left"></p>
+  <div id="click-target">
+    <p id="time-left"></p>
+    <div id="hourglass"></div>
+  </div>
 
-  <button id="start" type="button">Start</button>
-  <button id="flip" type="button">Flip</button>
   <button id="reset" type="button">Reset</button>
 
 </body>
+
 </html>
