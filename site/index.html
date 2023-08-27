@@ -188,6 +188,7 @@
           stopRinging();
           animateTimeLeft(now.until(deadline));
           animateSand();
+          timer = schedule(updateUi, deadline);
         } else {
           ring();
           const enableResetTime = deadline.add({ seconds: 1 });
