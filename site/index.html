@@ -256,7 +256,7 @@
     body {
       background: var(--bg);
       font: 1em sans-serif;
-      height: 100vh;
+      height: 100dvh;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -287,13 +287,13 @@
     }
 
     #time-left {
-      font-size: calc(2rem + min(15vh, 50vw));
+      font-size: calc(2rem + min(15dvh, 50dvw));
       font-variant-numeric: tabular-nums;
     }
 
     #hourglass {
       /* 9em tall. */
-      font-size: max(1rem, calc(8vh - 0.5rem));
+      font-size: max(1rem, calc(8dvh - 0.5rem));
     }
 
     @property --total-milliseconds-left {
