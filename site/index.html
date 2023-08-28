@@ -160,8 +160,8 @@
       const totalMs = duration.total('milliseconds');
       hourglass.animate({
         clipPath: ["var(--polygonB1)", "var(--polygonB2)", "var(--polygonB3)", "var(--polygonB4)", "var(--polygonB5)"],
-        // The sand stream forms and falls in 400ms.
-        offset: [0, 400 / totalMs, .5, 1 - (400/totalMs), 1],
+        // The sand stream forms falls in 400ms, unless that's too large a fraction of the total time.
+        offset: [0, Math.min(.1, 400 / totalMs), .5, Math.max(.9, 1 - (400/totalMs)), 1],
       }, {
         pseudoElement: '::before',
         duration: totalMs,
