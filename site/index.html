@@ -157,13 +157,17 @@
 
     function animateSand() {
       const now = Temporal.Now.instant();
+      const totalMs = duration.total('milliseconds');
       hourglass.animate({
         clipPath: ["var(--polygonB1)", "var(--polygonB2)", "var(--polygonB3)", "var(--polygonB4)", "var(--polygonB5)"],
-        offset: [0, .1, .5, .95, 1],
+        // The sand stream forms and falls in 400ms.
+        offset: [0, 400 / totalMs, .5, 1 - (400/totalMs), 1],
       }, {
         pseudoElement: '::before',
-        duration: duration.total('milliseconds'),
+        duration: totalMs,
+        // Negative delay to start with some sand already fallen.
         delay: now.until(start).total('milliseconds'),
+        // For some reason, unless we set 'fill', the animation loops.
         fill: 'forwards',
       });
     }
